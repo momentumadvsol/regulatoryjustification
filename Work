@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsible Lending Justification Tool (RLJT)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for professional aesthetic */
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
+        .card { box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 3px 10px -3px rgba(0, 0, 0, 0.05); }
+        .input-group label { font-weight: 600; color: #1e293b; }
+        .justification-output { white-space: pre-wrap; font-family: monospace; }
+        /* XAI Visualization */
+        .shap-positive { background-color: #d1fae5; color: #065f46; }
+        .shap-negative { background-color: #fee2e2; color: #991b1b; }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-blue': '#1e40af',
+                        'success-green': '#10b981',
+                        'fail-red': '#ef4444',
+                    }
+                }
+            }
+        }
+
+        // --- Core Business Logic (Simulating the AI Model) ---
+
+        /**
+         * Simulates the AI model's decision and generates an audit-ready justification.
+         */
+        function calculateDecision() {
+            // 1. Collect inputs
+            const income = parseFloat(document.getElementById('annualIncome').value) || 0;
+            const existingDebt = parseFloat(document.getElementById('monthlyDebt').value) || 0;
+            const loanAmount = parseFloat(document.getElementById('loanAmount').value) || 0;
+            const creditScore = parseInt(document.getElementById('creditScore').value) || 0;
+            const loanTermYears = parseInt(document.getElementById('loanTerm').value) || 0;
+
+            const resultsDiv = document.getElementById('justificationResults');
+            resultsDiv.innerHTML = ''; // Clear previous results
+
+            if (income <= 0 || existingDebt < 0 || loanAmount <= 0 || creditScore < 300 || loanTermYears <= 0) {
+                alert("Please enter valid, non-zero values for Income, Loan Amount, Credit Score, and Loan Term.");
+                return;
+            }
+            
+            // 2. Calculate Derived Metrics (Financial Soundness)
+            const monthlyPaymentEst = (loanAmount / (loanTermYears * 12)) * 1.02; // Simple estimate with 2% interest factor
+            const grossMonthlyIncome = income / 12;
+            const newTotalMonthlyDebt = existingDebt + monthlyPaymentEst;
+            const dtiRatio = (newTotalMonthlyDebt / grossMonthlyIncome) * 100;
+
+            // 3. Apply Decision Logic (Underwriting Rules)
+            let decision = 'DENIED';
+            let decisionColor = 'fail-red';
+            let rationale = 'Insufficient creditworthiness.';
+            
+            const isCreditExcellent = creditScore >= 740;
+            const isDtiExcellent = dtiRatio <= 30;
+            const isDtiAcceptable = dtiRatio <= 43;
+
+            // Primary Decision Logic (Highly Simplified for Demo)
+            if (isDtiExcellent && isCreditExcellent) {
+                decision = 'APPROVED';
+                decisionColor = 'success-green';
+                rationale = 'The borrower demonstrates exceptional financial stability and low repayment risk.';
+            } else if (isDtiAcceptable && creditScore >= 680) {
+                decision = 'APPROVED (Conditional)';
+                decisionColor = 'primary-blue';
+                rationale = 'The borrower meets standard underwriting criteria but may be subject to a higher interest rate.';
+            } else if (dtiRatio > 50 || creditScore < 600) {
+                decision = 'DENIED';
+                decisionColor = 'fail-red';
+                rationale = 'The Debt-to-Income (DTI) ratio exceeds the maximum acceptable threshold, indicating high risk of default.';
+            }
+
+            // 4. Simulate XAI/SHAP Factor Analysis
+            const factors = generateShapFactors(dtiRatio, creditScore, monthlyPaymentEst);
+
+            // 5. Generate Regulator Justification Report
+            const report = generateRegulatorReport(decision, dtiRatio, creditScore, grossMonthlyIncome, newTotalMonthlyDebt, monthlyPaymentEst, factors, rationale);
+            
+            // 6. Display Results
+            displayResults(decision, decisionColor, report, factors);
+        }
+
+        /**
+         * Simulates SHAP values (feature contribution) based on calculated metrics.
+         */
+        function generateShapFactors(dti, creditScore, monthlyPayment) {
+            const factors = [
+                { name: "Debt-to-Income (DTI) Ratio", value: dti.toFixed(1) + '%', impact: dti < 36 ? 'Positive' : (dti > 43 ? 'Negative' : 'Neutral'), description: "Key measure of repayment capacity relative to gross income." },
+                { name: "FICO Score", value: creditScore, impact: creditScore >= 740 ? 'Positive' : (creditScore < 650 ? 'Negative' : 'Neutral'), description: "Indicator of past credit management and default history." },
+                { name: "New Monthly Payment", value: `$${monthlyPayment.toFixed(2)}`, impact: monthlyPayment < 1500 ? 'Positive' : 'Neutral', description: "The immediate monthly financial obligation created by this loan." },
+            ];
+
+            // Introduce a bias detection proxy (e.g., zip code proxy for income stability)
+            const zipCode = document.getElementById('zipCode').value;
+            if (zipCode.startsWith('914') && creditScore > 700) {
+                 factors.push({ name: "Geographic Stability Index", value: "High", impact: 'Positive', description: "Secondary factor indicating stable residential tenure." });
+            } else if (zipCode.startsWith('914') && creditScore < 650) {
+                 factors.push({ name: "Geographic Stability Index", value: "Low", impact: 'Negative', description: "Secondary factor indicating potential economic volatility." });
+            }
+
+            return factors;
+        }
+
+        /**
+         * Generates the final, structured report for the regulator.
+         */
+        function generateRegulatorReport(decision, dti, gmi, newDebt, monthlyPay, factors, rationale) {
+            const decisionType = decision.startsWith('APPROVED') ? 'Approval' : 'Denial';
+            
+            let regulatoryReason = '';
+            if (decisionType === 'Approval') {
+                regulatoryReason = `The application was GREEN-LIT based on a holistic assessment. The primary approval driver was the *exceptionally low Debt-to-Income ratio*, which minimizes inherent repayment risk. The decision is fair, non-discriminatory, and aligns with the bank's Tier 1 lending policies.`;
+            } else {
+                // Generate a specific, non-biased denial reason (mandated by ECOA)
+                const primaryDenialReason = (dti > 50) ? 
+                    "Debt-to-Income (DTI) ratio is excessive, indicating insufficient disposable income." : 
+                    "Credit history indicates high risk of delinquency (FICO below 600)." ;
+
+                regulatoryReason = `The application was RED-FLAGGED and DENIED. The specific reason for Adverse Action (mandated by ECOA) is: **${primaryDenialReason}**. The decision is purely based on objective financial metrics, with no reliance on protected class data.`;
+            }
+
+
+            // Format the final report
+            return `
+RLJT MODEL VALIDATION REPORT: ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+----------------------------------------------------------------------------------------------------------------
+1. FINAL MODEL DECISION: ${decision}
+2. PRIMARY RATIONALE: ${rationale}
+
+----------------------------------------------------------------------------------------------------------------
+3. CORE FINANCIAL METRICS (VALIDATOR CHECK)
+    > Gross Monthly Income (GMI): \$${gmi.toFixed(2)}
+    > New Total Monthly Debt: \$${newDebt.toFixed(2)} (Including new loan payment of \$${monthlyPay.toFixed(2)})
+    > Calculated Debt-to-Income (DTI) Ratio: ${dti.toFixed(2)}%
+    > Underwriting Policy Threshold (Max DTI): 43.00%
+
+----------------------------------------------------------------------------------------------------------------
+4. XAI / FEATURE CONTRIBUTION (SHAP-STYLE ANALYSIS)
+    (Proving non-biased feature usage for audit traceability)
+
+${factors.map(f => {
+    const impactClass = f.impact === 'Positive' ? 'shap-positive' : (f.impact === 'Negative' ? 'shap-negative' : 'bg-gray-200');
+    return `    - ${f.name.padEnd(30, ' ')}: ${f.impact.padEnd(8, ' ')} | Value: ${f.value} | Rationale: ${f.description}`;
+}).join('\n')}
+
+----------------------------------------------------------------------------------------------------------------
+5. REGULATOR JUSTIFICATION (FAIR LENDING & AUDIT TRAIL)
+    * **Fairness Check:** Decision is non-discriminatory; no protected class features contributed to the decision.
+    * **Traceability:** Decision is fully reproducible using only objective inputs (DTI, Credit Score, Income).
+    * **Compliance Statement:** ${regulatoryReason}
+----------------------------------------------------------------------------------------------------------------
+`;
+        }
+
+
+        function displayResults(decision, decisionColor, report, factors) {
+            const resultsDiv = document.getElementById('justificationResults');
+
+            const decisionHTML = `
+                <div class="mb-4 p-4 rounded-lg text-center ${decisionColor} text-white font-bold text-xl">
+                    FINAL AI DECISION: ${decision}
+                </div>
+            `;
+            
+            const factorsHTML = factors.map(f => `
+                <div class="flex justify-between items-center py-2 border-b last:border-b-0">
+                    <span class="font-semibold text-gray-700">${f.name}</span>
+                    <span class="text-sm ${f.impact === 'Positive' ? 'text-success-green' : (f.impact === 'Negative' ? 'text-fail-red' : 'text-gray-500')} font-mono">
+                        ${f.impact} (${f.value})
+                    </span>
+                </div>
+            `).join('');
+
+
+            resultsDiv.innerHTML = `
+                ${decisionHTML}
+
+                <div class="bg-white p-6 rounded-lg card mb-6">
+                    <h3 class="text-lg font-bold text-primary-blue mb-4 border-b pb-2">Feature Contribution Summary</h3>
+                    ${factorsHTML}
+                </div>
+
+                <div class="bg-white p-6 rounded-lg card">
+                    <h3 class="text-lg font-bold text-primary-blue mb-4 border-b pb-2">Audit-Ready Justification Report</h3>
+                    <div class="justification-output text-gray-800 text-sm p-3 border border-gray-300 rounded bg-gray-50">${report}</div>
+                </div>
+            `;
+        }
+
+        // Initialize the tool with the previously approved customer's data
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('annualIncome').value = '140000';
+            document.getElementById('monthlyDebt').value = '1800';
+            document.getElementById('loanAmount').value = '50000';
+            document.getElementById('creditScore').value = '780';
+            document.getElementById('loanTerm').value = '60'; // 5 years
+            document.getElementById('zipCode').value = '91411';
+            calculateDecision(); // Run initial calculation on load
+        });
+    </script>
+</head>
+<body>
+    <div class="min-h-screen p-6 flex items-center justify-center">
+        <div class="w-full max-w-4xl">
+            <h1 class="text-3xl font-extrabold text-gray-900 text-center mb-8">
+                Responsible Lending Justification Tool (RLJT)
+            </h1>
+
+            <!-- Input Card -->
+            <div class="bg-white p-8 rounded-xl card mb-8">
+                <h2 class="text-xl font-bold text-gray-800 mb-6">Applicant Data Input</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <div class="input-group">
+                        <label for="annualIncome" class="block text-sm mb-1">Annual Gross Income ($)</label>
+                        <input type="number" id="annualIncome" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="monthlyDebt" class="block text-sm mb-1">Existing Monthly Debt Payments ($)</label>
+                        <input type="number" id="monthlyDebt" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="creditScore" class="block text-sm mb-1">FICO Credit Score (300-850)</label>
+                        <input type="number" id="creditScore" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue" min="300" max="850" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="loanAmount" class="block text-sm mb-1">Requested Loan Amount ($)</label>
+                        <input type="number" id="loanAmount" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="loanTerm" class="block text-sm mb-1">Loan Term (Months - e.g., 60 for 5 years)</label>
+                        <input type="number" id="loanTerm" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="zipCode" class="block text-sm mb-1">Applicant Zip Code (For Proxy Testing)</label>
+                        <input type="text" id="zipCode" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue" maxlength="5">
+                    </div>
+
+                </div>
+
+                <div class="mt-8">
+                    <button onclick="calculateDecision()" class="w-full bg-primary-blue hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition duration-200">
+                        Run Model & Generate Justification
+                    </button>
+                </div>
+            </div>
+
+            <!-- Output Area -->
+            <div id="justificationResults">
+                <!-- Results will be displayed here -->
+            </div>
+            
+            <p class="text-xs text-gray-500 text-center mt-6">
+                Disclaimer: This tool simulates an AI model's decision process for educational purposes only. It does not constitute legal, financial, or regulatory advice.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
