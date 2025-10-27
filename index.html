@@ -14,6 +14,7 @@
         /* XAI Visualization */
         .shap-positive { background-color: #d1fae5; color: #065f46; }
         .shap-negative { background-color: #fee2e2; color: #991b1b; }
+        .bias-alert { background-color: #fef3c7; color: #b45309; border: 2px solid #f59e0b; }
     </style>
     <script>
         tailwind.config = {
@@ -35,6 +36,7 @@
          */
         function calculateDecision() {
             // 1. Collect inputs
+            const name = document.getElementById('applicantName').value || 'Applicant';
             const income = parseFloat(document.getElementById('annualIncome').value) || 0;
             const existingDebt = parseFloat(document.getElementById('monthlyDebt').value) || 0;
             const loanAmount = parseFloat(document.getElementById('loanAmount').value) || 0;
@@ -50,7 +52,7 @@
             }
             
             // 2. Calculate Derived Metrics (Financial Soundness)
-            const monthlyPaymentEst = (loanAmount / (loanTermYears * 12)) * 1.02; // Simple estimate with 2% interest factor
+            const monthlyPaymentEst = (loanAmount / (loanTermYears * 12)) * 1.02; 
             const grossMonthlyIncome = income / 12;
             const newTotalMonthlyDebt = existingDebt + monthlyPaymentEst;
             const dtiRatio = (newTotalMonthlyDebt / grossMonthlyIncome) * 100;
@@ -59,7 +61,8 @@
             let decision = 'DENIED';
             let decisionColor = 'fail-red';
             let rationale = 'Insufficient creditworthiness.';
-            
+            let denialReasonCode = ''; // Specific ECOA reason code
+
             const isCreditExcellent = creditScore >= 740;
             const isDtiExcellent = dtiRatio <= 30;
             const isDtiAcceptable = dtiRatio <= 43;
@@ -73,20 +76,99 @@
                 decision = 'APPROVED (Conditional)';
                 decisionColor = 'primary-blue';
                 rationale = 'The borrower meets standard underwriting criteria but may be subject to a higher interest rate.';
-            } else if (dtiRatio > 50 || creditScore < 600) {
-                decision = 'DENIED';
-                decisionColor = 'fail-red';
-                rationale = 'The Debt-to-Income (DTI) ratio exceeds the maximum acceptable threshold, indicating high risk of default.';
+            } else {
+                // DENIAL LOGIC - Generate specific, legally compliant reasons
+                if (dtiRatio > 50) {
+                    rationale = 'The Debt-to-Income (DTI) ratio is too high for the requested loan amount.';
+                    denialReasonCode = 'A. Excessive obligations in relation to income.';
+                } else if (creditScore < 600) {
+                    rationale = 'Credit score is below the minimum threshold, indicating a history of poor debt management.';
+                    denialReasonCode = 'B. Insufficient credit score/Credit history indicates high risk of delinquency.';
+                } else if (loanAmount > (income * 0.5) && creditScore < 700) {
+                     rationale = 'Requested loan amount is too large relative to annual income, despite a technically acceptable DTI.';
+                    denialReasonCode = 'C. Requested loan amount exceeds policy limits based on annual income.';
+                } else {
+                     rationale = 'The application failed internal policy checks for unknown reasons.';
+                    denialReasonCode = 'D. Failure to meet minimum established credit requirements.';
+                }
             }
 
             // 4. Simulate XAI/SHAP Factor Analysis
             const factors = generateShapFactors(dtiRatio, creditScore, monthlyPaymentEst);
 
-            // 5. Generate Regulator Justification Report
-            const report = generateRegulatorReport(decision, dtiRatio, creditScore, grossMonthlyIncome, newTotalMonthlyDebt, monthlyPaymentEst, factors, rationale);
+            // 5. Run Bias Audit
+            const biasAudit = runBiasAudit(decision, name, dtiRatio, denialReasonCode);
+
+
+            // 6. Generate Regulator Justification Report
+            const report = generateRegulatorReport(decision, dtiRatio, creditScore, grossMonthlyIncome, newTotalMonthlyDebt, monthlyPaymentEst, factors, rationale, denialReasonCode);
             
-            // 6. Display Results
-            displayResults(decision, decisionColor, report, factors);
+            // 7. Generate Adverse Action Letter (AAN)
+            const adverseActionLetter = generateAdverseActionLetter(name, denialReasonCode);
+
+            // 8. Display Results
+            displayResults(decision, decisionColor, report, factors, biasAudit, adverseActionLetter);
+        }
+        
+        /**
+         * Generates the compliant customer-facing AAN text.
+         */
+        function generateAdverseActionLetter(name, denialReasonCode) {
+            if (denialReasonCode === '') {
+                return null;
+            }
+
+            let reasonText = '';
+            switch (denialReasonCode) {
+                case 'A. Excessive obligations in relation to income.':
+                    reasonText = "Your current debt obligations are too high in relation to your verifiable gross income.";
+                    break;
+                case 'B. Insufficient credit score/Credit history indicates high risk of delinquency.':
+                    reasonText = "Your credit history, as reflected in your credit score, does not meet the minimum requirement for this type of loan.";
+                    break;
+                case 'C. Requested loan amount exceeds policy limits based on annual income.':
+                    reasonText = "The loan amount requested significantly exceeds the maximum allowed based on your current annual income.";
+                    break;
+                case 'D. Failure to meet minimum established credit requirements.':
+                default:
+                    reasonText = "We are unable to approve your application due to our minimum established credit requirements.";
+                    break;
+            }
+
+            return `
+Dear ${name},
+
+Thank you for applying for a loan with Banner Banking Company. We regret to inform you that we are unable to approve your application at this time.
+
+The primary reason(s) for this adverse action decision are:
+
+1. **${reasonText}** (${denialReasonCode.split('.')[0]})
+
+This decision was made based on a review of your credit history and financial profile. Please note that this is NOT based on your race, color, religion, national origin, sex, marital status, or age.
+
+Sincerely,
+Banner Banking Company Compliance Officer
+            `;
+        }
+
+        /**
+         * Runs a simulated check for proxy bias, flagging the result if a protected group is denied by a non-financial factor.
+         */
+        function runBiasAudit(decision, name, dtiRatio, denialReasonCode) {
+            // SIMULATION: Flag if a non-traditional/ethnic name is denied for a reason that is close to the acceptable threshold.
+            // This tests the model's robustness against hidden bias.
+            const suspectedBiasName = name.toLowerCase().includes('jang') || name.toLowerCase().includes('chen');
+            
+            if (decision.includes('DENIED') && suspectedBiasName) {
+                // If denied, but DTI is close to acceptable (e.g., between 43% and 50%) AND the zip code was a negative factor (simulated in SHAP)
+                if (dtiRatio > 43 && dtiRatio <= 50 && denialReasonCode === 'D. Failure to meet minimum established credit requirements.') {
+                    return {
+                        flagged: true,
+                        message: "CRITICAL: The denial reason is ambiguous and occurred near the decision threshold. This instance requires manual review for **Disparate Impact Risk** as the decision may be a proxy for bias based on the applicant's name/demographic profile."
+                    };
+                }
+            }
+            return { flagged: false, message: "No critical proxy bias detected in this instance." };
         }
 
         /**
@@ -101,10 +183,11 @@
 
             // Introduce a bias detection proxy (e.g., zip code proxy for income stability)
             const zipCode = document.getElementById('zipCode').value;
-            if (zipCode.startsWith('914') && creditScore > 700) {
+            // Ensure zipCode is not empty before checking startswith
+            if (zipCode && zipCode.startsWith('914') && creditScore > 700) {
                  factors.push({ name: "Geographic Stability Index", value: "High", impact: 'Positive', description: "Secondary factor indicating stable residential tenure." });
-            } else if (zipCode.startsWith('914') && creditScore < 650) {
-                 factors.push({ name: "Geographic Stability Index", value: "Low", impact: 'Negative', description: "Secondary factor indicating potential economic volatility." });
+            } else if (zipCode && zipCode.startsWith('914') && creditScore < 650) {
+                 factors.push({ name: "Geographic Stability Index", value: "Low", impact: 'Negative', description: "Secondary factor indicating potential economic volatility (PROXY RISK)." });
             }
 
             return factors;
@@ -113,19 +196,17 @@
         /**
          * Generates the final, structured report for the regulator.
          */
-        function generateRegulatorReport(decision, dti, gmi, newDebt, monthlyPay, factors, rationale) {
+        function generateRegulatorReport(decision, dti, creditScore, gmi, newDebt, monthlyPay, factors, rationale, denialReasonCode) {
             const decisionType = decision.startsWith('APPROVED') ? 'Approval' : 'Denial';
             
-            let regulatoryReason = '';
+            let regulatoryReasonOutput = '';
             if (decisionType === 'Approval') {
-                regulatoryReason = `The application was GREEN-LIT based on a holistic assessment. The primary approval driver was the *exceptionally low Debt-to-Income ratio*, which minimizes inherent repayment risk. The decision is fair, non-discriminatory, and aligns with the bank's Tier 1 lending policies.`;
+                regulatoryReasonOutput = `The application was GREEN-LIT based on a holistic assessment. The primary approval driver was the *exceptionally low Debt-to-Income ratio*, which minimizes inherent repayment risk. The decision is fair, non-discriminatory, and aligns with the bank's Tier 1 lending policies.`;
             } else {
-                // Generate a specific, non-biased denial reason (mandated by ECOA)
-                const primaryDenialReason = (dti > 50) ? 
-                    "Debt-to-Income (DTI) ratio is excessive, indicating insufficient disposable income." : 
-                    "Credit history indicates high risk of delinquency (FICO below 600)." ;
-
-                regulatoryReason = `The application was RED-FLAGGED and DENIED. The specific reason for Adverse Action (mandated by ECOA) is: **${primaryDenialReason}**. The decision is purely based on objective financial metrics, with no reliance on protected class data.`;
+                // Use the specific denial code for the Adverse Action Notice
+                regulatoryReasonOutput = `The application was RED-FLAGGED and DENIED.
+    * **Specific ECOA Adverse Action Reason Code:** ${denialReasonCode}
+    * **Compliance Statement:** The decision is purely based on objective financial metrics (credit, income, debt obligations), with no reliance on protected class data. This satisfies the Adverse Action Notice requirement under Regulation B (ECOA).`;
             }
 
 
@@ -142,13 +223,13 @@ RLJT MODEL VALIDATION REPORT: ${new Date().toLocaleDateString('en-US', { month: 
     > New Total Monthly Debt: \$${newDebt.toFixed(2)} (Including new loan payment of \$${monthlyPay.toFixed(2)})
     > Calculated Debt-to-Income (DTI) Ratio: ${dti.toFixed(2)}%
     > Underwriting Policy Threshold (Max DTI): 43.00%
+    > Credit Score: ${creditScore}
 
 ----------------------------------------------------------------------------------------------------------------
 4. XAI / FEATURE CONTRIBUTION (SHAP-STYLE ANALYSIS)
     (Proving non-biased feature usage for audit traceability)
 
 ${factors.map(f => {
-    const impactClass = f.impact === 'Positive' ? 'shap-positive' : (f.impact === 'Negative' ? 'shap-negative' : 'bg-gray-200');
     return `    - ${f.name.padEnd(30, ' ')}: ${f.impact.padEnd(8, ' ')} | Value: ${f.value} | Rationale: ${f.description}`;
 }).join('\n')}
 
@@ -156,21 +237,38 @@ ${factors.map(f => {
 5. REGULATOR JUSTIFICATION (FAIR LENDING & AUDIT TRAIL)
     * **Fairness Check:** Decision is non-discriminatory; no protected class features contributed to the decision.
     * **Traceability:** Decision is fully reproducible using only objective inputs (DTI, Credit Score, Income).
-    * **Compliance Statement:** ${regulatoryReason}
+    * **Compliance Statement:** ${regulatoryReasonOutput}
 ----------------------------------------------------------------------------------------------------------------
 `;
         }
 
 
-        function displayResults(decision, decisionColor, report, factors) {
+        function displayResults(decision, decisionColor, report, factors, biasAudit, adverseActionLetter) {
             const resultsDiv = document.getElementById('justificationResults');
+            let decisionHTML = '';
 
-            const decisionHTML = `
-                <div class="mb-4 p-4 rounded-lg text-center ${decisionColor} text-white font-bold text-xl">
-                    FINAL AI DECISION: ${decision}
-                </div>
-            `;
+            // Handle Bias Alert Display
+            let biasAlertHTML = '';
+            if (biasAudit.flagged) {
+                decisionHTML = `
+                    <div class="mb-4 p-4 rounded-lg text-center bg-yellow-600 text-white font-bold text-xl">
+                        RISK ALERT: ${decision}
+                    </div>
+                    <div class="bias-alert p-4 rounded-lg mb-4 text-center">
+                        <strong class="text-lg">BIAS PROXY FLAG!</strong><br>
+                        ${biasAudit.message} <br> 
+                        <span class="text-sm">MANDATORY HUMAN REVIEW REQUIRED.</span>
+                    </div>
+                `;
+            } else {
+                decisionHTML = `
+                    <div class="mb-4 p-4 rounded-lg text-center ${decisionColor} text-white font-bold text-xl">
+                        FINAL AI DECISION: ${decision}
+                    </div>
+                `;
+            }
             
+            // Build Feature Summary
             const factorsHTML = factors.map(f => `
                 <div class="flex justify-between items-center py-2 border-b last:border-b-0">
                     <span class="font-semibold text-gray-700">${f.name}</span>
@@ -179,6 +277,20 @@ ${factors.map(f => {
                     </span>
                 </div>
             `).join('');
+
+            // Build Adverse Action Letter (only if denied)
+            let adverseActionHTML = '';
+            if (adverseActionLetter) {
+                adverseActionHTML = `
+                    <div class="bg-white p-6 rounded-lg card mt-6">
+                        <h3 class="text-lg font-bold text-fail-red mb-4 border-b pb-2">ADVERSE ACTION NOTICE (AAN) - Customer Facing</h3>
+                        <div class="justification-output text-gray-800 text-sm p-3 border border-red-400 rounded bg-red-50">
+                            ${adverseActionLetter}
+                        </div>
+                        <p class="text-xs text-gray-500 mt-3 italic">This is the exact content required by Regulation B (ECOA) to be sent to the applicant after a denial.</p>
+                    </div>
+                `;
+            }
 
 
             resultsDiv.innerHTML = `
@@ -193,11 +305,14 @@ ${factors.map(f => {
                     <h3 class="text-lg font-bold text-primary-blue mb-4 border-b pb-2">Audit-Ready Justification Report</h3>
                     <div class="justification-output text-gray-800 text-sm p-3 border border-gray-300 rounded bg-gray-50">${report}</div>
                 </div>
+                
+                ${adverseActionHTML}
             `;
         }
 
         // Initialize the tool with the previously approved customer's data
         document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('applicantName').value = 'Dr. Amelia K. Chen';
             document.getElementById('annualIncome').value = '140000';
             document.getElementById('monthlyDebt').value = '1800';
             document.getElementById('loanAmount').value = '50000';
@@ -220,6 +335,11 @@ ${factors.map(f => {
                 <h2 class="text-xl font-bold text-gray-800 mb-6">Applicant Data Input</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     
+                    <div class="input-group md:col-span-2">
+                        <label for="applicantName" class="block text-sm mb-1">Applicant Name (For Bias Proxy Check)</label>
+                        <input type="text" id="applicantName" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue" required>
+                    </div>
+
                     <div class="input-group">
                         <label for="annualIncome" class="block text-sm mb-1">Annual Gross Income ($)</label>
                         <input type="number" id="annualIncome" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue" required>
